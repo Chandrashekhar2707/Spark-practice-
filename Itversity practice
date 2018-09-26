@@ -1,0 +1,647 @@
+sqoop-import \
+--connect jdbc:mysql://ms.itversity.com:3306/retail_db \
+--username retail_user \
+--password itversity \
+--table orders \
+--target-dir /user/chandrashekhar/problem1/solution/ \
+--fields-terminated-by "," \
+--as-textfile
+
+
+val CustomersData = scala.io.Source.fromFile("/data/retail_db/customers/part-00000").getLines.toList
+val CustomersRDD = sc.parallelize(CustomersData)
+
+val OrdersData = scala.io.Source.fromFile("/data/retail_db/orders/part-00000").getLines.toList
+val OrdersRDD = sc.parallelize(OrdersData)
+
+val CustomerDF = CustomersRDD.
+map(rec => (rec.split(",")(0) , rec.split(",")(1),rec.split(",")(2))).
+toDF("customer_id","customer_fname","customer_lname")
+
+CustomerDF.registerTempTable("customers")
+OrdersDF.registerTempTable("orders")
+
+val OrdersDF = OrdersRDD.
+map(rec => (rec.split(",")(0) , rec.split(",")(2))).
+toDF("order_id","order_customer_id")
+
+val result = sqlContext.sql("select customer_lname ,customer_fname  from  customers left outer join orders on "+
+"customer_id = order_customer_id  order by customer_lname ,customer_fname " )
+
+result.
+map(rec=>(rec.mkString(","))).coalesce(1).saveAsTextFile("/user/chandrashekhar/problem2/solution/")
+
+
+Instructions
+Get top 3 crime types based on number of incidents in RESIDENCE area using "Location Description"
+
+Data Description
+Data is available in HDFS under /public/crime/csv
+
+crime data information:
+
+Structure of data: (ID, Case Number, Date, Block, IUCR, Primary Type, Description, Location Description, Arrst, Domestic, Beat, District, Ward, Community Area, FBI Code, X Coordinate, Y Coordinate, Year, Updated on, Latitude, Longitude, Location)
+File format - text file
+Delimiter - "," (use regex while splitting split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1), as there are some fields with comma and enclosed using double quotes.
+Output Requirements
+Output Fields: crime_type, incident_count
+Output File Format: JSON
+Delimiter: N/A
+Compression: No
+Place the output file in the HDFS directory
+/user/`whoami`/problem3/solution/
+Replace `whoami` with your OS user name
+
+val crimeData = sc.textFile("/public/crime/csv")
+val crimeRDD = crimeData.
+map(rec=> ( rec.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)(5),rec.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)(7),1))
+val crimeDF = crimeRDD.
+toDF("crime_type","Location_Description","incident_count")
+crimeDF.registerTempTable("crimedata")
+
+val result = sqlContext.sql("select crime_type , sum(incident_count) incident_count from crimedata where "+
+"Location_Description = 'RESIDENCE' group by crime_type order by incident_count desc   ")
+
+val result = sqlContext.sql(" select * from (select crime_type , sum(incident_count) incident_count from crimedata where "+
+"Location_Description = 'RESIDENCE' group by crime_type order by incident_count desc ) A limit 3 ")
+
+result.write.json("/user/chandrashekhar/problem3/solution/")
+
+
+
+
+Instructions
+Convert NYSE data into parquet
+
+NYSE data Description
+Data is available in local file system under /data/NYSE (ls -ltr /data/NYSE)
+
+NYSE Data information:
+
+Fields (stockticker:string, transactiondate:string, openprice:float, highprice:float, lowprice:float, closeprice:float, volume:bigint)
+Output Requirements
+Column Names: stockticker, transactiondate, openprice, highprice, lowprice, closeprice, volume
+Convert file format to parquet
+Place the output file in the HDFS directory
+/user/`whoami`/problem4/solution/
+Replace `whoami` with your OS user name
+
+hadoop fs -copyFromLocal /data/nyse/*  /user/chandrashekhar/nyse/
+
+hadoop fs -ls /user/chandrashekhar/nyse/
+
+val stockRDD = sc.textFile("/user/chandrashekhar/nyse/").
+map(rec => (rec.split(",")(0) ,rec.split(",")(1),rec.split(",")(2).toFloat,rec.split(",")(3).toFloat,rec.split(",")(4).toFloat ,rec.split(",")(5).toFloat,rec.split(",")(6).toInt  )).
+toDF("stockticker", "transactiondate", "openprice", "highprice", "lowprice", "closeprice", "volume")
+
+stockRDD.coalesce(1).write.parquet("/user/chandrashekhar/problem4/solution")
+sqlContext.read.parquet("/user/chandrashekhar/problem4/solution/").show
+stockRDD.registerTempTable("stock")
+
+sqlContext.sql("select * from stock where volume > 10")
+
+
+
+
+Instructions
+Get total number of orders for each customer where the cutomer_state = 'TX'
+
+Data Description
+retail_db data is available in HDFS at /public/retail_db
+
+retail_db data information:
+
+Source directories: /public/retail_db/orders and /public/retail_db/customers
+Source Columns - orders - order_id, order_date, order_customer_id, order_status
+Source Columns - customers - customer_id, customer_fname, customer_lname, customer_state (8th column) and many more
+delimiter: (",")
+Output Requirements
+Output Fields: customer_fname, customer_lname, order_count
+File Format: text
+Delimiter: Tab character (\t)
+Place the result file in the HDFS directory
+/user/`whoami`/problem6/solution/
+Replace `whoami` with your OS user name
+
+
+
+
+val OrdersDF = sc.textFile("/public/retail_db/orders").
+map(rec => (rec.split(",")(0).toInt , rec.split(",")(2).toInt)).
+toDF("order_id","order_customer_id")
+
+val CustomerDF = sc.textFile("/public/retail_db/customers").
+map(rec => (rec.split(",")(0).toInt , rec.split(",")(1),rec.split(",")(2) , rec.split(",")(7) )).
+toDF("customer_id","customer_fname","customer_lname","customer_state")
+
+CustomerDF.registerTempTable("customers")
+OrdersDF.registerTempTable("orders")
+
+val result = sqlContext.sql("select customer_fname ,customer_lname ,count(distinct order_id) order_count "+
+"from  customers  join orders on "+
+"customer_id = order_customer_id where customer_state  = 'TX' group by customer_fname ,customer_lname" )
+
+
+result.
+map(rec=>(rec.mkString("\t"))).coalesce(1).saveAsTextFile("/user/chandrashekhar/problem6/solution/")
+
+
+
+Instructions
+Get word count for the input data using space as delimiter (for each word, we need to get how many times it is repeated in the entire input data set)
+
+Data Description
+Data is available in HDFS /public/randomtextwriter
+
+word count data information:
+
+Number of executors should be 10
+executor memory should be 3 GB
+Executor cores should be 20 in total (2 per executor)
+Number of output files should be 8
+Avro dependency details: groupId -> com.databricks, artifactId -> spark-avro_2.10, version -> 2.0.1
+Output Requirements
+Output File format: Avro
+Output fields: word, count
+Compression: Uncompressed
+Place the customer files in the HDFS directory
+/user/`whoami`/problem5/solution/
+Replace `whoami` with your OS user name
+
+spark-shell --master yarn --conf spark.ui.port=12654 --packages com.databricks:spark-avro_2.10:2.0.1 \
+--num-executors 10 --executor-memory 3G
+
+
+val data = sc.textFile("/public/randomtextwriter").
+     flatMap(rec => (rec.split(" "))).
+     map(rec=>(rec,1)).
+     reduceByKey((total,element) => total+element).
+     map(rec=> ((-rec._2,rec._1),rec)).
+     sortByKey().
+     map(rec=>rec._2).
+     toDF("word","count")
+
+     import com.databricks.spark.avro._
+     data.coalesce(8).write.avro("/user/chandrashekhar/problem5/solution/")
+
+
+Instructions
+List the order Items where the order_status = 'PENDING PAYMENT' order by order_id
+
+Data Description
+Data is available in HDFS location
+
+retail_db data information:
+
+Source directories: /data/retail_db/orders
+Source delimiter: comma(",")
+Source Columns - orders - order_id, order_date, order_customer_id, order_status
+Output Requirements
+Target columns: order_id, order_date, order_customer_id, order_status
+File Format: orc
+Place the output files in the HDFS directory
+/user/`whoami`/problem8/solution/
+Replace `whoami` with your OS user name
+
+
+val OrdersDF = sc.textFile("/public/retail_db/orders").
+map(rec => (rec.split(",")(0).toInt , rec.split(",")(1) , rec.split(",")(2) ,rec.split(",")(3) )).
+toDF("order_id","order_date","order_customer_id","order_status")
+OrdersDF.registerTempTable("orders")
+
+val result = sqlContext.sql("select order_id, order_date, order_customer_id, order_status from orders "+
+"where order_status = 'PENDING_PAYMENT'")
+
+
+
+result.write.orc("/user/chandrashekhar/problem8/solution/")
+
+
+
+Instructions
+Remove header from h1b data
+
+Data Description
+h1b data with ascii null "\0" as delimiter is available in HDFS
+
+h1b data information:
+
+HDFS location: /public/h1b/h1b_data
+First record is the header for the data
+Output Requirements
+Remove the header from the data and save rest of the data as is
+Data should be compressed using snappy algorithm
+Place the H1B data in the HDFS directory
+/user/`whoami`/problem9/solution/
+Replace `whoami` with your OS user name
+
+val data = sc.textFile("/public/h1b/h1b_data")
+val header = data.first
+val datawhdr = data.
+filter(rec => rec!= header)
+
+datawhdr.saveAsTextFile("/user/chandrashekhar/problem9/solution/", classOf[org.apache.hadoop.io.compress.SnappyCodec])
+
+sc.textFile("/user/chandrashekhar/problem9/solution/").take(10).foreach(println)
+
+
+
+Instructions
+Get number of LCAs filed for each year
+
+Data Description
+h1b data with ascii null "\0" as delimiter is available in HDFS
+
+h1b data information:
+
+HDFS Location: /public/h1b/h1b_data
+Ignore first record which is header of the data
+YEAR is 8th field in the data
+There are some LCAs for which YEAR is NA, ignore those records
+Output Requirements
+File Format: text
+Output Fields: YEAR, NUMBER_OF_LCAS
+Delimiter: Ascii null "\0"
+Place the output files in the HDFS directory
+/user/`whoami`/problem10/solution/
+Replace `whoami` with your OS user name
+End of Problem
+
+val data = sc.textFile("/public/h1b/h1b_data")
+val header = data.first
+val datawhdr = data.
+filter(rec => rec!= header)
+
+datawhdr.count
+
+val datayear = datawhdr.
+filter(rec => rec.split("\0")(7) != "NA")
+
+val result = datayear.
+map(rec => (rec.split("\0")(7),1)).
+reduceByKey((total,element) => total+element).
+map(rec => rec._1 + "\0" + rec._2).coalesce(1).
+saveAsTextFile("/user/chandrashekhar/problem10/solution/")
+
+datayear.
+map(rec => rec.split("\0")(7)).take(10).foreach(println)
+
+
+datawhdr.saveAsTextFile("/user/chandrashekhar/problem9/solution/", classOf[org.apache.hadoop.io.compress.SnappyCodec])
+
+sc.textFile("/user/chandrashekhar/problem10/solution/").take(10).foreach(println)
+
+
+Instructions
+Get number of LCAs by status for the year 2016
+
+Data Description
+h1b data with ascii null "\0" as delimiter is available in HDFS
+
+h1b data information:
+
+HDFS Location: /public/h1b/h1b_data
+Ignore first record which is header of the data
+YEAR is 8th field in the data
+STATUS is 2nd field in the data
+There are some LCAs for which YEAR is NA, ignore those records
+Output Requirements
+File Format: json
+Output Field Names: year, status, count
+Place the output files in the HDFS directory
+/user/`whoami`/problem11/solution/
+Replace `whoami` with your OS user name
+End of Problem
+
+val data = sc.textFile("/public/h1b/h1b_data")
+val header = data.first
+val datawhdr = data.
+filter(rec => rec!= header)
+
+datawhdr.count
+
+val datayear = datawhdr.
+filter(rec => rec.split("\0")(7) != "NA")
+datayear.count 
+
+
+val dataDF = datayear.
+map(rec => (rec.split("\0")(7),rec.split("\0")(1),1)).
+toDF("year", "status", "count")
+dataDF.registerTempTable("LCA")
+
+sqlContext.sql("select year, status, sum(count) from LCA where year = '2016' group by year, status").
+write.json("/user/chandrashekhar/problem11/solution/")
+
+sqlContext.read.json("/user/chandrashekhar/problem11/solution/").show
+
+
+
+Instructions
+Get top 5 employers for year 2016 where the status is WITHDRAWN or CERTIFIED-WITHDRAWN or DENIED
+
+Data Description
+h1b data with ascii null "\0" as delimiter is available in HDFS
+
+h1b data information:
+
+HDFS Location: /public/h1b/h1b_data
+Ignore first record which is header of the data
+YEAR is 7th field in the data
+STATUS is 2nd field in the data
+EMPLOYER is 3rd field in the data
+There are some LCAs for which YEAR is NA, ignore those records
+Output Requirements
+File Format: parquet
+Output Fields: employer_name, lca_count
+Data needs to be in descending order by count
+Place the output files in the HDFS directory
+/user/`whoami`/problem12/solution/
+Replace `whoami` with your OS user name
+
+
+val data = sc.textFile("/public/h1b/h1b_data")
+val header = data.first
+val datawhdr = data.
+filter(rec => rec!= header)
+
+datawhdr.count
+
+val datayear = datawhdr.
+filter(rec => rec.split("\0")(7) != "NA")
+datayear.count 
+
+
+val dataDF = datayear.
+map(rec => (rec.split("\0")(7),rec.split("\0")(1),rec.split("\0")(2),1)).
+toDF("year", "status","employer_name", "count")
+dataDF.registerTempTable("LCA")
+
+val result = sqlContext.sql("select employer_name,  sum(count) lca_count from LCA where year = '2016' "+
+" and status in ('WITHDRAWN' , 'CERTIFIED-WITHDRAWN' , 'DENIED') group by employer_name order by lca_count desc ")
+
+
+result.coalesce(1).write.parquet("/user/chandrashekhar/problem12/solution/")
+
+sqlContext.sql("select distinct status from LCA where year = '2016' ").show
+
+sqlContext.read.parquet("/user/chandrashekhar/problem12/solution/").show
+
+CREATE TABLE h1b_data (
+  ID                 INT,
+  CASE_STATUS        STRING,
+  EMPLOYER_NAME      STRING,
+  SOC_NAME           STRING,
+  JOB_TITLE          STRING,
+  FULL_TIME_POSITION STRING,
+  PREVAILING_WAGE    DOUBLE,
+  YEAR               INT,
+  WORKSITE           STRING,
+  LONGITUDE          STRING,
+  LATITUDE           STRING
+)ROW FORMAT DELIMITED FIELDS TERMINATED BY "\0";
+
+load data  inpath '/user/chandrashekhar/problem13' into table h1b_data;
+
+
+/public/h1b/h1b_data_noheader/
+
+hadoop fs -mkdir /user/chandrashekhar/problem13/
+
+hadoop fs -cp  /public/h1b/h1b_data_noheader/*  /user/chandrashekhar/problem13/
+
+select count(1) from h1b_data;
+
+
+val data = sc.textFile("/public/h1b/h1b_data_noheader")
+
+
+val datayear = data.
+filter(rec => rec.split("\0")(7) != "NA").
+filter(rec=>rec.split("\0")(6)!= "NA").saveAsTextFile("/user/chandrashekhar/problem13/")
+datayear.count 
+
+
+Instructions
+Export h1b data from hdfs to MySQL Database
+
+Data Description
+h1b data with ascii character "\001" as delimiter is available in HDFS
+
+h1b data information:
+
+HDFS Location: /public/h1b/h1b_data_to_be_exported
+Fields: 
+ID, CASE_STATUS, EMPLOYER_NAME, SOC_NAME, JOB_TITLE, FULL_TIME_POSITION, PREVAILING_WAGE, YEAR, WORKSITE, LONGITUDE, LATITUDE
+Number of records: 3002373
+Output Requirements
+Export data to MySQL Database
+MySQL database is running on ms.itversity.com
+User: h1b_user
+Password: itversity
+Database Name: h1b_export
+Table Name: h1b_data_`whoami`
+Nulls are represented as: NA
+After export nulls should not be stored as NA in database. It should be represented as database null
+Create table command:
+
+CREATE TABLE h1b_data_`whoami` (
+  ID                 INT, 
+  CASE_STATUS        VARCHAR(50), 
+  EMPLOYER_NAME      VARCHAR(100), 
+  SOC_NAME           VARCHAR(100), 
+  JOB_TITLE          VARCHAR(100), 
+  FULL_TIME_POSITION VARCHAR(50), 
+  PREVAILING_WAGE    FLOAT, 
+  YEAR               INT, 
+  WORKSITE           VARCHAR(50), 
+  LONGITUDE          VARCHAR(50), 
+  LATITUDE           VARCHAR(50));
+                
+Replace `whoami` with your OS user name
+Above create table command can be run using
+Login using mysql -u h1b_user -h ms.itversity.com -p
+When prompted enter password itversity
+Switch to database using use h1b_export
+Run above create table command by replacing `whoami` with your OS user name
+End of Problem
+
+sqoop-export \
+--connect jdbc:mysql://ms.itversity.com:3306/h1b_export \
+--username h1b_user \
+--password itversity \
+--table h1b_data_chandrashekhar \
+--export-dir /public/h1b/h1b_data_to_be_exported \
+--input-fields-terminated-by "\001" \
+--input-null-string 'NA' \
+--input-null-non-string 'NA' \
+--columns "ID, CASE_STATUS, EMPLOYER_NAME, SOC_NAME, JOB_TITLE, FULL_TIME_POSITION, PREVAILING_WAGE, YEAR, WORKSITE, LONGITUDE, LATITUDE"
+
+CREATE TABLE h1b_data_chandrashekhar (
+  ID                 INT, 
+  CASE_STATUS        VARCHAR(50), 
+  EMPLOYER_NAME      VARCHAR(100), 
+  SOC_NAME           VARCHAR(100), 
+  JOB_TITLE          VARCHAR(100), 
+  FULL_TIME_POSITION VARCHAR(50), 
+  PREVAILING_WAGE    FLOAT, 
+  YEAR               INT, 
+  WORKSITE           VARCHAR(50), 
+  LONGITUDE          VARCHAR(50), 
+  LATITUDE           VARCHAR(50));
+
+  select distinct CASE_STATUS from h1b_data_chandrashekhar;
+
+sqoop-import \
+--connect jdbc:mysql://ms.itversity.com:3306/h1b_export \
+--username h1b_user \
+--password itversity \
+--table h1b_data_chandrashekhar \
+--target-dir /user/chandrashekhar/problem15/solution/ \
+--as-avrodatafile \
+--where " CASE_STATUS = 'CERTIFIED' " \
+--num-mappers 1
+
+hadoop fs -ls /user/chandrashekhar/problem15/solution/
+
+
+Instructions
+Get NYSE data in ascending order by date and descending order by volume
+
+Data Description
+NYSE data with "," as delimiter is available in HDFS
+
+NYSE data information:
+
+HDFS location: /public/nyse
+There is no header in the data
+Output Requirements
+Save data back to HDFS
+Column order: stockticker, transactiondate, openprice, highprice, lowprice, closeprice, volume
+File Format: text
+Delimiter: :
+Place the sorted NYSE data in the HDFS directory
+/user/`whoami`/problem16/solution/
+Replace `whoami` with your OS user name
+End of Problem
+
+
+val nysedf = sc.textFile("/public/nyse").
+map(rec=> (rec.split(",")(0),rec.split(",")(1),rec.split(",")(2),rec.split(",")(3),rec.split(",")(4),rec.split(",")(5) ,rec.split(",")(6).toFloat)).
+toDF("stockticker", "transactiondate", "openprice", "highprice", "lowprice", "closeprice", "volume")
+
+nysedf.registerTempTable("nyse")
+
+val result = sqlContext.sql("select stockticker, transactiondate, openprice, highprice, lowprice, closeprice, volume from nyse "+
+"order by transactiondate , volume desc ")
+
+result.
+map(rec => rec.mkString(":")).
+saveAsTextFile("/user/chandrashekhar/problem16/solution/")
+
+sc.setLogLevel("ERROR")
+sc.textFile("/user/chandrashekhar/problem16/solution/").take(100).foreach(println)
+sc.textFile("/public/nyse_symbols").take(10).foreach(println)
+
+
+
+val nysedf = sc.textFile("/public/nyse").
+map(rec=> (rec.split(",")(0),rec.split(",")(1),rec.split(",")(2),rec.split(",")(3),rec.split(",")(4),rec.split(",")(5) ,rec.split(",")(6).toFloat)).
+toDF("stockticker", "transactiondate", "openprice", "highprice", "lowprice", "closeprice", "volume")
+
+nysedf.registerTempTable("nyse")
+
+
+val nysenamedf = sc.textFile("/public/nyse_symbols").
+map(rec=> (rec.split("\t")(0),rec.split("\t")(1))).
+toDF("stockticker2", "stock_symbol")
+
+nysenamedf.registerTempTable("nysymbol")
+
+val result = sqlContext.sql("select distinct stockticker  from nyse left outer join nysymbol on stockticker = stockticker2 where  stock_symbol is null" )
+
+import com.databricks.spark.avro._
+result.write.avro("/user/chandrashekhar/problem17/solution/")
+sqlContext.read.avro("/user/chandrashekhar/problem17/solution/")
+
+
+
+groupId -> com.databricks, artifactId -> spark-avro_2.10, version -> 2.0.1
+spark-shell --master yarn --conf spark.ui.port=12654  --packages com.databricks:spark-avro_2.10:2.0.1
+
+
+
+val result = sqlContext.sql("select stockticker, stock_symbol stock_name ,transactiondate, openprice, highprice, "+
+" lowprice, closeprice, volume from nyse "+
+" left outer join  nysymbol on stockticker = stockticker2  ")
+
+result.
+map(rec => rec.mkString(",")).saveAsTextFile("/user/chandrashekhar/problem18/solution/")
+
+sc.textFile("/user/chandrashekhar/problem18/solution/").take(100).foreach(println)
+
+
+Instructions
+Get number of companies who filed LCAs for each year
+
+Data Description
+h1b data with ascii null "\0" as delimiter is available in HDFS
+
+h1b data information:
+
+HDFS Location: /public/h1b/h1b_data_noheader
+Fields: 
+ID, CASE_STATUS, EMPLOYER_NAME, SOC_NAME, JOB_TITLE, FULL_TIME_POSITION, PREVAILING_WAGE, YEAR, WORKSITE, LONGITUDE, LATITUDE
+Use EMPLOYER_NAME as the criteria to identify the company name to get number of companies
+YEAR is 8th field
+There are some LCAs for which YEAR is NA, ignore those records
+Output Requirements
+File Format: text
+Delimiter: tab character "\t"
+Output Field Order: year, lca_count
+Place the output files in the HDFS directory
+/user/`whoami`/problem19/solution/
+Replace `whoami` with your OS user name
+End of Problem
+
+
+val data = sc.textFile("/public/h1b/h1b_data_noheader").
+map(rec=>(rec.split("\0")(8),rec.split("\0")(2) )).
+toDF("year","employer_name")
+
+data.registerTempTable("LCA")
+
+val result = sqlContext.sql("select year ,count(distinct employer_name) lca_count from LCA group by year")
+result.
+map(rec=> rec.mkString("\t")).saveAsTextFile("/user/chandrashekhar/problem19/solution/")
+
+hadoop fs -ls /user/chandrashekhar/problem19/solution/
+
+Installation on the node ms.itversity.com
+Database name is h1b_db
+Username: h1b_user
+Password: itversity
+Table name h1b_data
+
+sqoop-eval \
+--connect jdbc:mysql://ms.itversity.com:3306/h1b_db \
+--username h1b_user \
+--password itversity \
+--query "select * from h1b_data limit 10"
+
+sqoop-import \
+--connect jdbc:mysql://ms.itversity.com:3306/h1b_db \
+--username h1b_user \
+--password itversity \
+--query "select employer_name, case_status , count(1) count from h1b_data where \$CONDITIONS group by employer_name, \
+case_status order by employer_name , count desc" \
+--target-dir /user/chandrashekhar/problem20/solution/  \
+--num-mappers 1 \
+--fields-terminated-by "\t"
+
+hadoop fs -ls  /user/chandrashekhar/problem20/solution/
+
+
+
+
+
